@@ -82,12 +82,14 @@ module DAV4Rack
     # Return response to DELETE
     def delete
       raise NotFound unless resource.exist?
+      raise UnprocessableEntity if request.env['FRAGMENT']
       resource.lock_check
       resource.delete
     end
     
     # Return response to MKCOL
     def mkcol
+      raise UnsupportedMediaType if (request.body.length > 0)
       resource.lock_check
       status = resource.make_collection
       multistatus do |xml|
@@ -121,11 +123,15 @@ module DAV4Rack
         raise Conflict unless depth.is_a?(Symbol) || depth > 1
         status = resource.move(dest, overwrite)
       end
-      response['Location'] = "#{scheme}://#{host}:#{port}#{dest.public_path}" if status == Created
-      multistatus do |xml|
-        xml.response do
-          xml.href "#{scheme}://#{host}:#{port}#{status == Created ? dest.public_path : resource.public_path}"
-          xml.status "#{http_version} #{status.status_line}"
+      response['Location'] = "#{scheme}://#{host}:#{port}#{dest.public_path}" if status == Created || status == NoContent
+      if (status.successful?)
+        status
+      else
+        multistatus do |xml|
+          xml.response do
+            xml.href "#{scheme}://#{host}:#{port}#{status == Created ? dest.public_path : resource.public_path}"
+            xml.status "#{http_version} #{status.status_line}"
+          end
         end
       end
     end
