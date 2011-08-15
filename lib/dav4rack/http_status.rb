@@ -11,6 +11,10 @@ module DAV4Rack
         def status_line
           "#{code} #{reason_phrase}"
         end
+
+        def successful?
+          code >= 200 && code < 300
+        end
         
       end
       
@@ -28,8 +32,7 @@ module DAV4Rack
       
       def to_i
         self.class.to_i
-      end
-      
+      end      
     end
     
     StatusMessage = {
