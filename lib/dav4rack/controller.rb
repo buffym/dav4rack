@@ -345,7 +345,9 @@ module DAV4Rack
     
     # XML parsed request
     def request_document
-      @request_document ||= Nokogiri.XML(request.body.read)
+      @request_document ||= Nokogiri.XML(request.body.read) { |config| config.options = Nokogiri::XML::ParseOptions::STRICT }
+      raise BadRequest if @request_document.errors.length > 0
+      @request_document
     rescue
       raise BadRequest
     end
