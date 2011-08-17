@@ -315,7 +315,8 @@ module DAV4Rack
     
     # Available properties
     def property_names
-      %w(creationdate displayname getlastmodified getetag resourcetype getcontenttype getcontentlength)
+      names = %w(creationdate displayname getlastmodified getetag resourcetype getcontenttype getcontentlength)
+      names.map{ |name| {:name => name }}
     end
     
     # name:: String - Property name
@@ -329,6 +330,7 @@ module DAV4Rack
       when 'getcontenttype'   then content_type
       when 'getetag'          then etag
       when 'getlastmodified'  then last_modified.httpdate
+      else raise NotFound
       end
     end
 
@@ -341,6 +343,7 @@ module DAV4Rack
       when 'getcontenttype'  then self.content_type = value
       when 'getetag'         then self.etag = value
       when 'getlastmodified' then self.last_modified = Time.httpdate(value)
+      else raise Forbidden
       end
     rescue ArgumentError
       raise HTTPStatus::Conflict

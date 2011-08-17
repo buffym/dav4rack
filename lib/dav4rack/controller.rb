@@ -142,7 +142,8 @@ module DAV4Rack
       unless(request_document.xpath("//#{ns}propfind/#{ns}allprop").empty?)
         names = resource.property_names
       else
-        names = request_document.xpath("//#{ns}propfind/#{ns}prop").children.find_all{|n|n.element?}.map{|n|n.name}
+        #names = request_document.xpath("//#{ns}propfind/#{ns}prop").children.find_all{|n|n.element?}.map{|n|n.name}
+        names = get_props("//#{ns}propfind/#{ns}prop")
         names = resource.property_names if names.empty?
       end
       multistatus do |xml|
@@ -159,8 +160,8 @@ module DAV4Rack
     def proppatch
       raise NotFound unless resource.exist?
       resource.lock_check
-      prop_rem = request_match('/propertyupdate/remove/prop').children.map{|n| [n.name] }
-      prop_set = request_match('/propertyupdate/set/prop').children.map{|n| [n.name, n.text] }
+      prop_rem = request_document.xpath("/#{ns}propertyupdate/#{ns}remove/#{ns}prop").children.map{|n| { :name => n.name } }
+      prop_set = request_document.xpath("/#{ns}propertyupdate/#{ns}set/#{ns}prop").children.map{|n|  {:name => n.name, :value => n.text} }
       multistatus do |xml|
         find_resources.each do |resource|
           xml.response do
@@ -358,17 +359,30 @@ module DAV4Rack
       _ns = ''
       if(request_document && request_document.root && request_document.root.namespace_definitions.size > 0)
         _ns = request_document.root.namespace_definitions.first.prefix.to_s
-        _ns += ':' unless _ns.empty?
+        if (_ns.empty?)
+          _ns = 'xmlns:'
+        else
+          _ns += ':' unless _ns.empty?
+        end
       end
       _ns
     end
     
-    # pattern:: XPath pattern
-    # Search XML document for given XPath
-    def request_match(pattern)
-      nil unless request_document
-      request_document.xpath(pattern, request_document.root.namespaces)
+
+    def get_props(exp)
+      request_document.xpath(exp).children.find_all{|n| n.element?}.map do |prop_node|
+        prop = {}
+        if (prop_node.namespace_definitions.length > 0)
+          prop_ns = prop_node.namespace_definitions.first
+          prop[:href] = prop_ns.href ? prop_ns.href.to_str : nil
+          prop[:prefix] = prop_ns.prefix ? prop_ns.prefix.to_str : nil
+        end
+        prop[:name] = prop_node.name
+        prop[:value] = prop_node.text ? prop_node.text : nil
+        prop
+      end
     end
+
 
     # root_type:: Root tag name
     # Render XML and set Rack::Response#body= to final XML
@@ -410,16 +424,16 @@ module DAV4Rack
     # resource:: Resource
     # names:: Property names
     # Returns array of property values for given names
-    def get_properties(resource, names)
+    def get_properties(resource, props)
       stats = Hash.new { |h, k| h[k] = [] }
-      for name in names
+      for prop in props
         begin
-          val = resource.get_property(name)
-          stats[OK].push [name, val]
+          prop[:value] = resource.get_property(prop[:name])
+          stats[OK] << prop
         rescue Unauthorized => u
           raise u
         rescue Status
-          stats[$!] << name
+          stats[$!] << prop
         end
       end
       stats
@@ -428,39 +442,41 @@ module DAV4Rack
     # resource:: Resource
     # pairs:: name value pairs
     # Sets the given properties
-    def set_properties(resource, pairs)
+    def set_properties(resource, props)
       stats = Hash.new { |h, k| h[k] = [] }
-      for name, value in pairs
+      for prop in props
         begin
-          stats[OK] << [name, resource.set_property(name, value)]
+          prop[:value] = resource.set_property(prop[:name], prop[:value])
+          stats[OK] << prop
         rescue Unauthorized => u
           raise u
         rescue Status
-          stats[$!] << name
+          stats[$!] << prop
         end
       end
       stats
     end
-    
-    # xml:: Nokogiri::XML::Builder
-    # stats:: Array of stats
-    # Build propstats response
+
     def propstats(xml, stats)
       return if stats.empty?
       for status, props in stats
         xml.propstat do
           xml.prop do
-            for name, value in props
-              if(value.is_a?(Nokogiri::XML::Node))
-                xml.send(name) do
-                  xml_convert(xml, value)
+            for prop in props
+              ns_attr = {}
+              if (prop[:href] && prop[:href] != 'DAV:')
+                ns_attr = { "xmlns#{prop[:pref] ? ':' + prop[:prefix] : ""}" => prop[:href]}
+              end
+              if(prop[:value].is_a?(Nokogiri::XML::Node))
+                xml.send(prop[:name], ns_attr) do
+                  xml_convert(xml, prop[:value])
                 end
-              elsif(value.is_a?(Symbol))
-                xml.send(name) do
-                  xml.send(value)
+              elsif(prop[:value].is_a?(Symbol))
+                xml.send(prop[:name], ns_attr) do
+                  xml.send(prop[:value], ns_attr)
                 end
               else
-                xml.send(name, value)
+                xml.send(prop[:name], prop[:value], ns_attr)
               end
             end
           end
@@ -468,6 +484,7 @@ module DAV4Rack
         end
       end
     end
+ 
     
     # xml:: Nokogiri::XML::Builder
     # element:: Nokogiri::XML::Element
